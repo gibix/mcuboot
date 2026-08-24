@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) Arduino s.r.l. and/or its affiliated companies
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * MCUboot overlay: MCUboot in BFM, USB DFU recovery. Self-contained (no
+ * variant overlay, no --shield). Partitions live under flash0 (not flash1)
+ * because MCUboot computes chainload addresses relative to zephyr,flash base.
+ * Loader keeps its own flash1-based view — only absolute addresses must agree.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &flash0;
+		zephyr,flash-controller = &nvmctrl;
+		/* Must be here — board overlay overrides MCUboot's app.overlay. */
+		zephyr,code-partition = &boot_partition;
+		/* Recovery transport. Console must differ (CONSOLE=n). */
+		zephyr,uart-mcumgr = &board_cdc_acm_uart;
+	};
+
+	aliases {
+		/* Breathes while in serial recovery - see boot/arduino/hooks (mcuboot fork). */
+		mcuboot-led0 = &led_builtin;
+	};
+};
+
+/* Shared with loader/sketch — must agree on address. */
+#include "recovery_cookie.dtsi"
+
+/* Restore flash0 as the soc-nv-flash instance (board dtsi deletes it for the
+ * loader). Partitions use child offsets: 0x4000000 == PFM 0x0C000000. */
+&flash0 {
+	compatible = "microchip,flash-g3", "soc-nv-flash";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Active BFM Dual-Boot slot. Spare at 0x10000 not declared. */
+		boot_partition: mcuboot: partition@0 {
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(64)>;
+		};
+
+		/* 0x4000000 == PFM 0x0C000000. */
+		slot0_partition: image_0: partition@4000000 {
+			label = "image-0";
+			reg = <0x4000000 DT_SIZE_K(288)>;
+		};
+
+		/* Sketch: raw zsk/ELF, no MCUboot header. */
+		slot2_partition: image_2: partition@4048000 {
+			label = "image-2";
+			reg = <0x4048000 DT_SIZE_K(728)>;
+		};
+
+		/* Dummy secondaries: compile-time reference only, never written. */
+		slot1_partition: image_1: partition@40FE000 {
+			label = "image-1";
+			reg = <0x40FE000 DT_SIZE_K(4)>;
+		};
+
+		slot3_partition: image_3: partition@40FF000 {
+			label = "image-3";
+			reg = <0x40FF000 DT_SIZE_K(4)>;
+		};
+	};
+};
+
+/* PFM addressed through flash0 — flash1 gives up partitions + compatible. */
+&flash1 {
+	/delete-node/ partitions;
+	/delete-property/ compatible;
+};
+
+/* SERCOM UARTs unused (recovery uses CDC-ACM). Disabled here because the
+ * Kconfig is promptless. Re-enable sercom6 if turning on CONSOLE for debug. */
+&sercom0 { status = "disabled"; };
+&sercom1 { status = "disabled"; };
+&sercom6 { status = "disabled"; };
