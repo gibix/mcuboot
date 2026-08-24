@@ -493,7 +493,8 @@ void zephyr_boot_log_stop(void)
         */
 
 #if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_SERIAL_PIN_RESET) \
-    || defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_SERIAL_NO_APPLICATION)
+    || defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_SERIAL_NO_APPLICATION) \
+    || defined(CONFIG_BOOT_SERIAL_DOUBLE_RESET)
 static void boot_serial_enter()
 {
     int rc;
@@ -555,6 +556,19 @@ int main(void)
         FIH_PANIC;
     }
 #endif /* CONFIG_MCUBOOT_UUID_VID || CONFIG_MCUBOOT_UUID_CID */
+
+#ifdef CONFIG_BOOT_SERIAL_DOUBLE_RESET
+    /*
+     * Checked first and unconditionally: this arms/consumes the noinit-RAM
+     * cookie on every boot (see io_detect_double_reset()), and on a normal
+     * (non-double-tap) boot blocks for the window duration before letting
+     * boot_go() run below - matching the previous dfu_boot sample's timing.
+     */
+    BOOT_LOG_DBG("Checking double-reset cookie for serial recovery");
+    if (io_detect_double_reset()) {
+        boot_serial_enter();
+    }
+#endif
 
 #ifdef CONFIG_BOOT_SERIAL_ENTRANCE_GPIO
     BOOT_LOG_DBG("Checking GPIO for serial recovery");

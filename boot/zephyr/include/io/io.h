@@ -62,6 +62,20 @@ bool io_detect_pin_reset(void);
  */
 bool io_detect_boot_mode(void);
 
+/*
+ * Checks a noinit-RAM magic cookie, armed on every boot, to detect whether
+ * this boot is a second (physical) reset landing within
+ * CONFIG_BOOT_SERIAL_DOUBLE_RESET_WINDOW_MS of a previous one, and if so
+ * whether the device should stay in serial recovery mode. On a first/normal
+ * boot, blocks for the window duration before returning so a following
+ * quick reset is reliably observed as "second tap" by the next boot.
+ * Arduino-local addition (not upstream MCUboot) - see
+ * ArduinoCore-zephyr/extra/mcuboot/patches/.
+ *
+ * @retval	false for normal boot, true for serial recovery boot
+ */
+bool io_detect_double_reset(void);
+
 #ifdef CONFIG_SOC_FAMILY_NORDIC_NRF
 static inline bool io_boot_skip_serial_recovery()
 {

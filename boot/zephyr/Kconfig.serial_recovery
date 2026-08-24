@@ -186,6 +186,32 @@ config BOOT_SERIAL_PIN_RESET
 	  Checks if the module reset was caused by the reset pin and will
 	  remain in bootloader serial recovery mode if it was.
 
+config BOOT_SERIAL_DOUBLE_RESET
+	bool "Double physical reset (Arduino-local addition, not upstream)"
+	help
+	  Arms a magic cookie in warm-reset-persistent RAM on every boot; if a
+	  previous boot already armed it (i.e. the device was reset again
+	  within BOOT_SERIAL_DOUBLE_RESET_WINDOW_MS of the prior boot),
+	  remains in serial recovery mode. Unlike
+	  BOOT_SERIAL_ENTRANCE_GPIO/PIN_RESET, needs no dedicated button/GPIO
+	  and works even with no valid/working application in slot0.
+
+	  The cookie is placed in the "dfu_cookie" reserved-memory region if
+	  the devicetree declares one, so that a running application can arm
+	  it and reset - making a host-side 1200-bps touch equivalent to a
+	  physical double-tap - and in a private __noinit word otherwise.
+
+	  Ported from ArduinoCore-zephyr's samples/dfu_boot bootloader; see
+	  extra/mcuboot/patches/ in that repo.
+
+config BOOT_SERIAL_DOUBLE_RESET_WINDOW_MS
+	int "Double reset detection window [ms]"
+	default 1000
+	depends on BOOT_SERIAL_DOUBLE_RESET
+	help
+	  How long a normal (non-double-tap) boot blocks before proceeding,
+	  to keep the window open for a fast second physical reset.
+
 endmenu
 
 config BOOT_SERIAL_IMG_GRP_HASH

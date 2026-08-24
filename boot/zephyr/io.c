@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <zephyr/kernel.h>
+#include <zephyr/init.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/__assert.h>
@@ -46,7 +47,8 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
     !defined(CONFIG_BOOT_SERIAL_WAIT_FOR_DFU) && \
     !defined(CONFIG_BOOT_SERIAL_BOOT_MODE) && \
     !defined(CONFIG_BOOT_SERIAL_NO_APPLICATION) && \
-    !defined(CONFIG_BOOT_SERIAL_PIN_RESET)
+    !defined(CONFIG_BOOT_SERIAL_PIN_RESET) && \
+    !defined(CONFIG_BOOT_SERIAL_DOUBLE_RESET)
 #error "Serial recovery selected without an entrance mode set"
 #endif
 #endif
@@ -216,3 +218,87 @@ bool io_detect_boot_mode(void)
     return false;
 }
 #endif
+
+#ifdef CONFIG_BOOT_SERIAL_DOUBLE_RESET
+/*
+ * Arduino-local entrance method (not upstream MCUboot): a double physical
+ * reset within a short window enters serial recovery, with no GPIO/button
+ * and no cooperating application required. Ported from the noinit-RAM
+ * magic-cookie technique previously used by an earlier bootloader for the
+ * same board family - see ArduinoCore-zephyr/extra/mcuboot/patches/.
+ */
+static bool double_reset_latched;
+
+#define DOUBLE_RESET_MAGIC 0x44524655U /* random cookie value, kept for compatibility */
+
+/*
+ * Where the cookie lives.
+ *
+ * If the devicetree declares a "recovery_cookie" reserved-memory region, use
+ * that rather than a private __noinit word. That is what makes the gesture
+ * reachable from software: a running application arms the very same word and
+ * resets, so a host-side 1200-bps touch is indistinguishable from a physical
+ * double-tap and an ordinary upload needs no gesture at all. Both sides derive
+ * the address from this node - see ArduinoCore-zephyr's
+ * variants/.../recovery_cookie.h and the matching node in
+ * extra/mcuboot/nano_chandler_bfm.overlay - so neither can drift. The region
+ * has to be carved out of the RAM the linker knows about, or .bss/.noinit will
+ * be laid over it.
+ *
+ * Without such a node this falls back to a private __noinit word, which still
+ * detects a physical double-tap; only the software-triggered entry is lost.
+ * Either way the storage must sit outside .bss and .data so it survives a warm
+ * reset but not a power cycle, which is exactly the lifetime wanted.
+ */
+#if DT_NODE_EXISTS(DT_NODELABEL(recovery_cookie))
+#define DOUBLE_RESET_COOKIE                                                    \
+    (*(volatile uint32_t *)DT_REG_ADDR(DT_NODELABEL(recovery_cookie)))
+#else
+static uint32_t double_reset_cookie __noinit;
+#define DOUBLE_RESET_COOKIE double_reset_cookie
+#endif
+
+/*
+ * Everything between the reset itself and the moment this cookie gets armed
+ * is a dead zone: a second physical reset landing in it finds an unarmed
+ * cookie and goes undetected, so the user has to deliberately wait before
+ * tapping again. Keeping that zone as short as possible is the whole game,
+ * so the arm/check runs from PRE_KERNEL_1 priority 0 - the earliest hook the
+ * kernel offers, right after the C runtime is up (BSS zeroed, .data copied;
+ * __noinit is excluded from both, which is what lets the cookie survive) and
+ * well before console/UART/driver init.
+ *
+ * Doing this from main() instead - as an earlier revision did - leaves tens
+ * of milliseconds of dead zone: console and UART bring-up, plus every boot
+ * log line, since CONFIG_LOG_MODE_MINIMAL makes each one a *blocking* printk
+ * (~87us/byte at 115200 baud). That is exactly why a fast double-tap failed
+ * while a deliberately delayed one worked.
+ */
+static int double_reset_arm(void)
+{
+    double_reset_latched = (DOUBLE_RESET_COOKIE == DOUBLE_RESET_MAGIC);
+
+    /* Arm for the next boot (or disarm, if this *is* the second tap). The
+     * window is held open, and the cookie finally cleared, back in
+     * io_detect_double_reset() once the kernel can actually sleep. */
+    DOUBLE_RESET_COOKIE = double_reset_latched ? 0U : DOUBLE_RESET_MAGIC;
+
+    return 0;
+}
+SYS_INIT(double_reset_arm, PRE_KERNEL_1, 0);
+
+bool io_detect_double_reset(void)
+{
+    BOOT_LOG_DBG("Double reset latched at PRE_KERNEL_1: %d",
+                 (int)double_reset_latched);
+
+    if (!double_reset_latched) {
+        /* Hold the window open so a second tap is still observed by the
+         * *next* boot as "cookie already armed", then disarm. */
+        k_msleep(CONFIG_BOOT_SERIAL_DOUBLE_RESET_WINDOW_MS);
+        DOUBLE_RESET_COOKIE = 0U;
+    }
+
+    return double_reset_latched;
+}
+#endif /* CONFIG_BOOT_SERIAL_DOUBLE_RESET */
