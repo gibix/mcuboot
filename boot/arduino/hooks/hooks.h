@@ -18,12 +18,4 @@
  */
 void mcuboot_hooks_led_breathe(void);
 
-/*
- * Install a sketch-only upload staged in slot1, if there is one. Called once
- * per boot from MCUBOOT_STATUS_STARTUP, which MCUboot reports before the
- * double-reset window and well before boot_go(). Silent and idempotent: with
- * nothing staged it reads one word and returns.
- */
-void mcuboot_hooks_install_staged_sketch(void);
-
 #endif /* ARDUINO_MCUBOOT_HOOKS_H_ */

@@ -45,9 +45,9 @@
 	(DT_REG_ADDR(DT_GPARENT(DT_NODELABEL(label))) + DT_REG_ADDR(DT_NODELABEL(label)))
 
 BUILD_ASSERT(SLOT_ABS(slot0_partition) == 0x0C000000,
-	     "slot0 moved: keep this overlay and the variant's -common.overlay in sync");
-BUILD_ASSERT(SLOT_ABS(slot1_partition) == 0x0C0E0000,
-	     "slot1 moved: keep this overlay and the variant's -common.overlay in sync");
+	     "slot0 moved: keep mcuboot.overlay and the variant's -common.overlay in sync");
+BUILD_ASSERT(SLOT_ABS(slot2_partition) == 0x0C048000,
+	     "slot2 moved: keep mcuboot.overlay and the variant's -common.overlay in sync");
 
 #ifdef CONFIG_USB_DEVICE_STACK_NEXT
 /*
@@ -116,15 +116,6 @@ static inline void usb_bringup(void)
 void mcuboot_status_change(mcuboot_status_type_t status)
 {
 	switch (status) {
-	case MCUBOOT_STATUS_STARTUP:
-		/*
-		 * Reported from main() before the double-reset window and long
-		 * before boot_go(), so anything installed here is validated by
-		 * the same boot that installed it.
-		 */
-		mcuboot_hooks_install_staged_sketch();
-		break;
-
 	case MCUBOOT_STATUS_SERIAL_DFU_ENTERED:
 	case MCUBOOT_STATUS_USB_DFU_ENTERED:
 		/* Before boot_console_init(), which is where MCUboot opens the

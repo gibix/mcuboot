@@ -15,7 +15,4 @@ zephyr_library_sources(hooks.c)
 zephyr_library_sources(status_led.c)
 # Must be part of the bootloader on this SoC, not optional: see pfswap.c.
 zephyr_library_sources(pfswap.c)
-# Sketch-only uploads: installs into slot0 from BFM, because a loader running
-# in slot0 cannot write its own flash panel. See the file header.
-zephyr_library_sources(sketch_install.c)
 zephyr_library_link_libraries(MCUBOOT_BOOTUTIL)

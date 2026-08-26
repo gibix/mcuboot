@@ -1,0 +1,214 @@
+/*
+ * Copyright (c) Arduino s.r.l. and/or its affiliated companies
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * MCUboot-side devicetree for the "MCUboot is the only bootloader" arrangement
+ * on nano_chandler / nano_chandler_monica. Self-contained: it needs neither the
+ * variant overlay nor --shield, and one build serves both boards (Monica is the
+ * same module plus a shield MCUboot never touches).
+ *
+ * MCUboot lives WHOLLY IN BFM, in one of the SoC's two 64K Dual-Boot slots,
+ * and is reached directly by the hardware reset vector. dfu_boot is gone; all
+ * of PFM is slots. Recovery is mcumgr/SMP over USB CDC-ACM.
+ *
+ * Resulting map (multi-image, upgrade-only, no validation):
+ *
+ *   0x08000000   64K  BFM Dual-Boot slot: MCUboot itself (this image)
+ *   0x08010000   64K  BFM spare slot: reserved for MCUboot self-update
+ *   0x0C000000  288K  slot0 - image 0 primary (loader only)
+ *   0x0C048000  728K  slot2 - image 1 primary (sketch, raw zsk/ELF)
+ *   0x0C0FE000    4K  slot1 - image 0 secondary (dummy, never written)
+ *   0x0C0FF000    4K  slot3 - image 1 secondary (dummy, never written)
+ *
+ * ---------------------------------------------------------------------------
+ * Why the partitions move under flash0, contrary to every other overlay here
+ * ---------------------------------------------------------------------------
+ *
+ * MCUboot assumes ONE flash device holds both itself and its slots. do_boot()
+ * computes the chainload address as
+ *
+ *     flash_device_base(rsp->br_flash_dev_id) + br_image_off + ih_hdr_size
+ *
+ * and flash_device_base() (boot/zephyr/flash_map_extended.c) returns the single
+ * CONFIG_FLASH_BASE_ADDRESS, i.e. the base of the `zephyr,flash` node. With
+ * this image linked into BFM that base is 0x08000000, so a slot declared as
+ * "offset 0x10000 into flash1" would be jumped to at 0x08010000 - the BFM spare
+ * slot - instead of 0x0C010000. It would not fail at build time.
+ *
+ * The fix is the model the SoC dtsi was designed for and that Microchip's own
+ * pic32ck_{gc01,sg01}_cult boards use: flash0 spans BFM + the unimplemented gap
+ * + PFM in one node (reg 0x08000000 + 0x4100000, with `ranges` and
+ * `unimplemented-region`), so a child offset of 0x4000000 IS 0x0C000000. Put the
+ * partitions there and every address MCUboot computes is right by construction.
+ *
+ * flash_mchp_nvmctrl_g3.c addresses flash as SOC_NV_FLASH_BASE_ADDR + offset
+ * with SOC_NV_FLASH_BASE_ADDR = DT_INST(0, soc_nv_flash), so flash0 must be that
+ * instance - hence the compatible swap below. It also skips the unimplemented
+ * gap, which flash0 already declares.
+ *
+ * The loader keeps its own flash1-based view of the same physical layout (see
+ * the variant's -common.overlay); the two only have to agree on addresses, not
+ * on how they are expressed. Keep them in sync.
+ */
+
+/ {
+	chosen {
+		/*
+		 * Both must point at flash0: `zephyr,flash` sets
+		 * CONFIG_FLASH_BASE_ADDRESS, `zephyr,flash-controller`
+		 * is what MCUboot's own target.h looks up.
+		 */
+		zephyr,flash = &flash0;
+		zephyr,flash-controller = &nvmctrl;
+
+		/*
+		 * Link this image into &boot_partition (0x08000000, 64K).
+		 *
+		 * MCUboot's own app.overlay sets this, but Zephyr picks
+		 * boards/<BOARD>.overlay INSTEAD OF app.overlay (not both),
+		 * so the setting must live here. Without it the board dtsi's
+		 * `zephyr,code-partition = &slot0_partition` wins and the
+		 * image links into PFM at 0x0C000000.
+		 */
+		zephyr,code-partition = &boot_partition;
+
+		/*
+		 * Serial recovery runs mcumgr/SMP over the board's USB CDC-ACM
+		 * port - no UART adapter, the same cable used to upload. The
+		 * node comes from the board's own
+		 * boards/common/usb/cdc_acm_serial.dtsi, and the USB device is
+		 * brought up by CONFIG_CDC_ACM_SERIAL_INITIALIZE_AT_BOOT; see
+		 * nano_chandler_bfm.conf.
+		 *
+		 * Restated even though it is already the board default, because
+		 * MCUboot silently falls back to "no transport" if this ever
+		 * moves, and because the console must never be the same device
+		 * (MCUboot refuses to build if it is - hence CONSOLE=n).
+		 */
+		zephyr,uart-mcumgr = &board_cdc_acm_uart;
+	};
+
+	aliases {
+		/* Breathes while in serial recovery - see boot/arduino/hooks (mcuboot fork). */
+		mcuboot-led0 = &led_builtin;
+	};
+};
+
+/*
+ * The double-tap / 1200-bps handoff cookie, and the sram0 shrink that reserves
+ * it. Included from the variant rather than restated here: a running loader or
+ * sketch arms this word and THIS image consumes it, so the two must agree on an
+ * address, and nothing in either build can detect them drifting apart - both
+ * would compile and link cleanly while pointing at different words, and the
+ * only symptom would be that uploads silently stop entering recovery.
+ */
+#include "recovery_cookie.dtsi"
+
+/*
+ * Make flash0 the one soc-nv-flash instance, spanning BFM through PFM.
+ *
+ * The board dtsi deletes flash0's compatible so that flash1 (PFM only) becomes
+ * DT_INST(0, soc_nv_flash) and the singleton driver is aimed at PFM - right for
+ * the loader and for dfu_boot, wrong here. Restoring it flips the instance to
+ * the wide node; flash1 gives up both its compatible and its partitions below
+ * so exactly one instance remains.
+ *
+ * `reg` is deliberately NOT narrowed: the wide span is what makes the 0x4000000
+ * child offsets reach PFM. The image is capped at 64K by
+ * CONFIG_FLASH_LOAD_SIZE instead, which is also how samples/dfu_boot does it.
+ *
+ * Note MCUboot never writes BFM: its own image is not a slot, and BFM writes
+ * would need the LBWP/UBWP unlock dance the driver knows nothing about (see
+ * samples/dfu_boot/src/bfm_flash.c). Self-update is a later iteration.
+ */
+&flash0 {
+	compatible = "microchip,flash-g3", "soc-nv-flash";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/*
+		 * This image, in the active BFM Dual-Boot slot. The chosen
+		 * node above sets `zephyr,code-partition = &boot_partition`,
+		 * so the label has to exist; making it the real 64K slot means
+		 * CONFIG_USE_DT_CODE_PARTITION derives both the link address
+		 * and the 64K cap from here, with no second place to keep in
+		 * sync.
+		 *
+		 * The spare slot at 0x10000 is deliberately NOT declared: it is
+		 * nothing to this build, and a flash_area over BFM would only
+		 * invite a write that the driver silently drops (BFM needs the
+		 * LBWP/UBWP unlock dance in samples/dfu_boot/src/bfm_flash.c).
+		 */
+		boot_partition: mcuboot: partition@0 {
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(64)>;
+		};
+
+		/* 0x4000000 == PFM 0x0C000000. */
+		slot0_partition: image_0: partition@4000000 {
+			label = "image-0";
+			reg = <0x4000000 DT_SIZE_K(288)>;
+		};
+
+		/*
+		 * Image 1: the sketch, as raw zsk/ELF data (no MCUboot header).
+		 * MCUboot does not chainload this — the loader finds and runs
+		 * it. With BOOT_VALIDATE_SLOT0=n MCUboot does not check it
+		 * either; it exists as a slot so DIRECT_IMAGE_UPLOAD can
+		 * target it (smpmgr --slot 2).
+		 */
+		slot2_partition: image_2: partition@4048000 {
+			label = "image-2";
+			reg = <0x4048000 DT_SIZE_K(728)>;
+		};
+
+		/*
+		 * Dummy secondaries: MCUboot's upgrade-only path opens them
+		 * to look for IMAGE_MAGIC, finds 0xFF, and skips. Nothing
+		 * ever writes to them. They must exist because sysflash.h's
+		 * FLASH_AREA_IMAGE_SECONDARY() is a compile-time reference.
+		 */
+		slot1_partition: image_1: partition@40FE000 {
+			label = "image-1";
+			reg = <0x40FE000 DT_SIZE_K(4)>;
+		};
+
+		slot3_partition: image_3: partition@40FF000 {
+			label = "image-3";
+			reg = <0x40FF000 DT_SIZE_K(4)>;
+		};
+	};
+};
+
+/*
+ * PFM is now addressed through flash0, so this node must give up both its
+ * partitions and its compatible. The partitions have to go first: Zephyr's
+ * flash_map_default.c emits a device reference per fixed-partitions parent, and
+ * a partition under a compatible-less node fails to link.
+ */
+&flash1 {
+	/delete-node/ partitions;
+	/delete-property/ compatible;
+};
+
+/*
+ * Drop the SERCOM UARTs: 1923 B of driver that is linked and never called.
+ *
+ * `zephyr,uart-mcumgr` is board_cdc_acm_uart - a UART device registered by
+ * subsys/usb's CDC-ACM class, not by this driver - and the console is off, so
+ * nothing in this image opens a SERCOM. The driver still builds because
+ * UART_MCHP_SERCOM_G1 is promptless and follows
+ * DT_HAS_MICROCHIP_SERCOM_G1_UART_ENABLED, which is why this is done here and
+ * not in the .conf: assigning that symbol is a Kconfig error.
+ *
+ * `zephyr,console` still points at sercom6 from the board dtsi. That is
+ * harmless with CONFIG_CONSOLE=n - nothing dereferences it - but it does mean
+ * turning a console back on for debugging needs these three nodes back as well
+ * as the console Kconfigs. See extra/mcuboot/README.md.
+ */
+&sercom0 { status = "disabled"; };
+&sercom1 { status = "disabled"; };
+&sercom6 { status = "disabled"; };
