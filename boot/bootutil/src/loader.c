@@ -1935,8 +1935,18 @@ context_boot_go(struct boot_loader_state *state, struct boot_rsp *rsp)
         /* Even if we're not re-validating the primary slot, we could be booting
          * onto an empty flash chip. At least do a basic sanity check that
          * the magic number on the image is OK.
+         *
+         * In a multi-image configuration where secondary images carry raw
+         * (non-MCUboot) data (e.g. a sketch uploaded via DIRECT_IMAGE_UPLOAD),
+         * only image 0 — the one fill_rsp() actually chainloads — needs a
+         * valid MCUboot header. Skip the check for the others so that raw
+         * data in their primary slots does not prevent boot.
          */
-        if (BOOT_IMG(state, BOOT_SLOT_PRIMARY).hdr.ih_magic != IMAGE_MAGIC) {
+        if (BOOT_IMG(state, BOOT_SLOT_PRIMARY).hdr.ih_magic != IMAGE_MAGIC
+#if (BOOT_IMAGE_NUMBER > 1)
+            && BOOT_CURR_IMG(state) == 0
+#endif
+            ) {
             BOOT_LOG_ERR("Bad image magic 0x%lx; Image=%u", (unsigned long)
                          BOOT_IMG(state, BOOT_SLOT_PRIMARY).hdr.ih_magic,
                          BOOT_CURR_IMG(state));
