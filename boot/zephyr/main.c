@@ -222,13 +222,41 @@ static void boot_serial_enter(int inactivity_in_ms)
 }
 #endif
 
+#if defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
+#include <zephyr/retention/bootmode.h>
+
+static bool check_boot_mode() {
+
+  printk("-------------- Check boot mode ---------------\n");
+  bool rv = false;
+  int boot_mode = bootmode_check(BOOT_MODE_TYPE_BOOTLOADER);
+  if (boot_mode < 0) {
+    LOG_ERR("ERROR: Unable to read boot mode (%d)\n", boot_mode);
+  }
+  if (boot_mode == 1) {
+    printk("boot mode found\n");
+    rv = true;
+  }
+  if (bootmode_clear()) {
+    printk("ERROR: Unable to clear boot mode\n");
+  }
+  return rv;
+}
+#endif
 int main(void)
 {
     struct boot_rsp rsp;
     int rc;
-#if defined(CONFIG_BOOT_USB_DFU_GPIO) || defined(CONFIG_BOOT_USB_DFU_WAIT)
+#if defined(CONFIG_BOOT_USB_DFU_GPIO) || defined(CONFIG_BOOT_USB_DFU_WAIT) ||  \
+    defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
     bool usb_dfu_requested = false;
     bool usb_dfu_forever = false;
+#endif
+#if defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
+  if (check_boot_mode()) {
+    usb_dfu_requested = true;
+    usb_dfu_forever = true;
+  }
 #endif
     FIH_DECLARE(fih_rc, FIH_FAILURE);
 
@@ -297,7 +325,8 @@ int main(void)
     usb_dfu_requested = true;
 #endif
 
-#if defined(CONFIG_BOOT_USB_DFU_GPIO) || defined(CONFIG_BOOT_USB_DFU_WAIT)
+#if defined(CONFIG_BOOT_USB_DFU_GPIO) || defined(CONFIG_BOOT_USB_DFU_WAIT) || \
+    defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
     if (usb_dfu_requested) {
         rc = boot_usb_dfu_enable();
         if (rc) {
