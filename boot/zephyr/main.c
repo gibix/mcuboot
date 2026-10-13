@@ -225,20 +225,22 @@ static void boot_serial_enter(int inactivity_in_ms)
 #if defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
 #include <zephyr/retention/bootmode.h>
 
-static bool check_boot_mode() {
-  bool rv = false;
-  int boot_mode = bootmode_check(BOOT_MODE_TYPE_BOOTLOADER);
-  if (boot_mode < 0) {
-    LOG_ERR("ERROR: Unable to read boot mode (%d)\n", boot_mode);
-  }
-  if (boot_mode == 1) {
-    printk("boot mode found\n");
-    rv = true;
-  }
-  if (bootmode_clear()) {
-    LOG_ERR("ERROR: Unable to clear boot mode\n");
-  }
-  return rv;
+static bool check_boot_mode(void)
+{
+    bool rv = false;
+    int boot_mode = bootmode_check(BOOT_MODE_TYPE_BOOTLOADER);
+
+    if (boot_mode < 0) {
+        BOOT_LOG_ERR("Unable to read boot mode (%d)", boot_mode);
+    }
+    if (boot_mode == 1) {
+        BOOT_LOG_INF("Boot mode requests USB DFU");
+        rv = true;
+    }
+    if (bootmode_clear()) {
+        BOOT_LOG_ERR("Unable to clear boot mode");
+    }
+    return rv;
 }
 #endif
 int main(void)
