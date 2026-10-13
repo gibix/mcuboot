@@ -226,8 +226,6 @@ static void boot_serial_enter(int inactivity_in_ms)
 #include <zephyr/retention/bootmode.h>
 
 static bool check_boot_mode() {
-
-  printk("-------------- Check boot mode ---------------\n");
   bool rv = false;
   int boot_mode = bootmode_check(BOOT_MODE_TYPE_BOOTLOADER);
   if (boot_mode < 0) {
@@ -238,7 +236,7 @@ static bool check_boot_mode() {
     rv = true;
   }
   if (bootmode_clear()) {
-    printk("ERROR: Unable to clear boot mode\n");
+    LOG_ERR("ERROR: Unable to clear boot mode\n");
   }
   return rv;
 }
@@ -253,15 +251,24 @@ int main(void)
     bool usb_dfu_forever = false;
 #endif
 #if defined(CONFIG_BOOT_USB_DFU_BOOT_MODE)
-  if (check_boot_mode()) {
-    usb_dfu_requested = true;
-    usb_dfu_forever = true;
-  }
+    bool boot_mode_requested = check_boot_mode();
+    if (boot_mode_requested) {
+        usb_dfu_requested = true;
+        usb_dfu_forever = true;
+    }
 #endif
     FIH_DECLARE(fih_rc, FIH_FAILURE);
 
+#if defined(CONFIG_BOOT_USB_DFU_BOOT_MODE) && \
+    defined(CONFIG_BOOT_USB_DFU_AVOID_WATCHDOG)
+  if (!boot_mode_requested) {
     MCUBOOT_WATCHDOG_SETUP();
     MCUBOOT_WATCHDOG_FEED();
+  }
+#else
+    MCUBOOT_WATCHDOG_SETUP();
+    MCUBOOT_WATCHDOG_FEED();
+#endif
 
 #if !defined(MCUBOOT_DIRECT_XIP)
     BOOT_LOG_INF("Starting bootloader");
