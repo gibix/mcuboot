@@ -82,7 +82,7 @@ static void blink_fade_led(void *arg0, void *arg1, void *arg2) {
   ARG_UNUSED(arg2);
 
   if (!pwm_is_ready_dt(&pwm_led)) {
-    LOG_ERR("Error: PWM device %s is not ready", pwm_led.dev->name);
+    BOOT_LOG_ERR("Error: PWM device %s is not ready", pwm_led.dev->name);
     return;
   }
 
@@ -91,7 +91,7 @@ static void blink_fade_led(void *arg0, void *arg1, void *arg2) {
   while (atomic_get(&fade_led_running)) {
     int ret = pwm_set_pulse_dt(&pwm_led, pulse_width);
     if (ret < 0) {
-      LOG_ERR("Error %d: failed to set pulse width", ret);
+      BOOT_LOG_ERR("Error %d: failed to set pulse width", ret);
       break;
     }
 
@@ -115,7 +115,7 @@ static void blink_fade_led(void *arg0, void *arg1, void *arg2) {
 
   int ret = pwm_set_pulse_dt(&pwm_led, 0);
   if (ret < 0) {
-    LOG_ERR("Error %d: failed to turn off LED", ret);
+    BOOT_LOG_ERR("Error %d: failed to turn off LED", ret);
   }
 }
 
