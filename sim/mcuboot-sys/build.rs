@@ -35,6 +35,7 @@ fn main() {
     let enc_x25519 = env::var("CARGO_FEATURE_ENC_X25519").is_ok();
     let enc_aes256_x25519 = env::var("CARGO_FEATURE_ENC_AES256_X25519").is_ok();
     let bootstrap = env::var("CARGO_FEATURE_BOOTSTRAP").is_ok();
+    let arduino_hooks = env::var("CARGO_FEATURE_ARDUINO_HOOKS").is_ok();
     let multiimage = env::var("CARGO_FEATURE_MULTIIMAGE").is_ok();
     let downgrade_prevention = env::var("CARGO_FEATURE_DOWNGRADE_PREVENTION").is_ok();
     let ram_load = env::var("CARGO_FEATURE_RAM_LOAD").is_ok();
@@ -100,6 +101,19 @@ fn main() {
         if !swap_offset && !swap_move {
             conf.conf.define("MCUBOOT_OVERWRITE_ONLY_FAST", None);
         }
+    }
+
+    if arduino_hooks {
+        let hooks = env::var("ARDUINO_MCUBOOT_HOOKS").unwrap_or_else(|_|
+            "../../../../core/loader/mcuboot_hooks/boot_hooks.c".to_string());
+        println!("cargo:rerun-if-env-changed=ARDUINO_MCUBOOT_HOOKS");
+        println!("cargo:rerun-if-changed={}", hooks);
+        let hooks = fs::canonicalize(&hooks)
+            .unwrap_or_else(|e| panic!("ARDUINO_MCUBOOT_HOOKS {}: {}", hooks, e));
+        conf.conf.define("MCUBOOT_IMAGE_ACCESS_HOOKS", None);
+        conf.conf.define("ARDUINO_MCUBOOT_HOOKS_FILE",
+                         Some(format!("\"{}\"", hooks.display()).as_str()));
+        conf.file("csupport/arduino_hooks.c");
     }
 
     if check_load_addr {

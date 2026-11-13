@@ -58,7 +58,13 @@ sim_test!(sector_aligned_bootstrap, make_sector_aligned_bootstrap_image(), run_b
 sim_test!(norevert_newimage, make_no_upgrade_image(&NO_DEPS, ImageManipulation::None), run_norevert_newimage());
 sim_test!(basic_revert, make_image(&NO_DEPS, true), run_basic_revert());
 sim_test!(revert_with_fails, make_image(&NO_DEPS, false), run_revert_with_fails());
+// A permanent update is a copy with the Arduino hooks: no old image in slot 1.
+#[cfg(not(feature = "arduino-hooks"))]
 sim_test!(perm_with_fails, make_image(&NO_DEPS, true), run_perm_with_fails());
+#[cfg(feature = "arduino-hooks")]
+sim_test!(arduino_perm_copy_with_fails, make_image(&NO_DEPS, true), run_arduino_perm_copy_with_fails());
+// A permanent update is a copy with the Arduino hooks: no old image in slot 1.
+#[cfg(not(feature = "arduino-hooks"))]
 sim_test!(perm_with_random_fails, make_image(&NO_DEPS, true), run_perm_with_random_fails(5));
 sim_test!(norevert, make_image(&NO_DEPS, true), run_norevert());
 sim_test!(oversized_secondary_slot, make_oversized_secondary_slot_image(), run_fail_upgrade_primary_intact());

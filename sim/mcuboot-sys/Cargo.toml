@@ -81,6 +81,10 @@ enc-aes256-x25519 = []
 # Allow bootstrapping an empty/invalid primary slot from a valid secondary slot
 bootstrap = []
 
+# Build the Arduino image access hooks (ARDUINO_MCUBOOT_HOOKS, default: the core
+# next to this west topdir) with MCUBOOT_IMAGE_ACCESS_HOOKS.
+arduino-hooks = []
+
 # Support multiple images (currently 2 instead of 1).
 multiimage = []
 

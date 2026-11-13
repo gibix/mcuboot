@@ -1070,6 +1070,77 @@ impl Images {
         fails > 0
     }
 
+    /// Arduino image access hooks: a permanent request (USB DFU upload)
+    /// overwrites the primary slot instead of swapping, also when the
+    /// copy is interrupted at any flash operation, and is never reverted.
+    pub fn run_arduino_perm_copy_with_fails(&self) -> bool {
+        if !Caps::Bootstrap.present() || !self.is_swap_upgrade() {
+            return false;
+        }
+
+        let mut fails = 0;
+        let total_flash_ops = self.total_count.unwrap();
+
+        // 0: no interruption.
+        for i in 0 .. total_flash_ops {
+            let stop = if i == 0 { None } else { Some(i) };
+            let (mut flash, _) = self.try_upgrade(stop, true);
+
+            if !self.verify_images(&flash, 0, 1) {
+                warn!("Primary slot is not the new image, step {} of {}",
+                      i, total_flash_ops);
+                fails += 1;
+            }
+            if self.verify_images(&flash, 1, 0) {
+                warn!("Old image kept in the secondary slot (swapped), step {} of {}",
+                      i, total_flash_ops);
+                fails += 1;
+            }
+            if !self.verify_trailers(&flash, 0, BOOT_MAGIC_GOOD,
+                                     BOOT_FLAG_SET, BOOT_FLAG_SET) {
+                warn!("Mismatched trailer for the primary slot, step {} of {}",
+                      i, total_flash_ops);
+                fails += 1;
+            }
+            if !self.verify_trailers(&flash, 1, BOOT_MAGIC_UNSET,
+                                     BOOT_FLAG_UNSET, BOOT_FLAG_UNSET) {
+                warn!("Mismatched trailer for the secondary slot, step {} of {}",
+                      i, total_flash_ops);
+                fails += 1;
+            }
+
+            // Later boots keep the new image and write nothing.
+            for _ in 0 .. 2 {
+                let mut counter = 0;
+                if !c::boot_go(&mut flash, &self.areadesc, Some(&mut counter),
+                               None, false).success() {
+                    warn!("Later boot failed, step {} of {}", i, total_flash_ops);
+                    fails += 1;
+                }
+                if counter != 0 {
+                    warn!("Later boot wrote {} times, step {} of {}",
+                          -counter, i, total_flash_ops);
+                    fails += 1;
+                }
+            }
+            if !self.verify_images(&flash, 0, 1) {
+                warn!("New image reverted, step {} of {}", i, total_flash_ops);
+                fails += 1;
+            }
+
+            if skip_slow_test() {
+                break;
+            }
+        }
+
+        if fails > 0 {
+            error!("{} failures over {} interruption points", fails,
+                   total_flash_ops);
+        }
+
+        fails > 0
+    }
+
     pub fn run_perm_with_random_fails(&self, total_fails: usize) -> bool {
         if !Caps::modifies_flash() {
             return false;
